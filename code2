@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>刃物検知カメラ</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 20px; }
+    #webcam-container { margin: 20px auto; }
+    #label-container { font-size: 1.2rem; font-weight: bold; margin-top: 10px; }
+    .alert-text { color: red; font-size: 1.5rem; display: none; margin-top: 15px; }
+    #error-log { color: red; background: #ffeeee; padding: 10px; margin: 15px auto; max-width: 80%; display: none; text-align: left; white-space: pre-wrap; font-size: 0.9rem; }
+    button { font-size: 1.1rem; padding: 12px 24px; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <h1>刃物検知カメラ</h1>
+  <button type="button" onclick="init()">カメラ起動・監視開始</button>
+  
+  <div id="error-log"></div>
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
+  <div id="alert-msg" class="alert-text">⚠️ 刃物を検知しました！</div>
+
+  <script type="text/javascript">
+    const URL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/"; // ←ご自身のURLに変更
+    const TARGET_CLASS = "刃物"; // ←ご自身のクラス名に変更
+    const THRESHOLD = 0.8;
+
+    let model, webcam, labelContainer, maxPredictions;
+    let audioCtx = null;
+    let isBeeping = false;
+
+    function showError(msg) {
+      const errBox = document.getElementById("error-log");
+      errBox.style.display = "block";
+      errBox.innerText = "【エラーが発生しました】\n" + msg;
+    }
+
+    function playAlertSound() {
+      if (isBeeping) return;
+      isBeeping = true;
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      setTimeout(() => {
+        osc.stop();
+        isBeeping = false;
+      }, 200);
+    }
+
+    async function init() {
+      document.getElementById("error-log").style.display = "none";
+      try {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        // AIモデルのロード
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        // カメラのセットアップ
+        const flip = true;
+        webcam = new tmImage.Webcam(320, 240, flip);
+        await webcam.setup(); // ここでカメラ許可ダイアログが出ます
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        labelContainer = document.getElementById("label-container");
+        labelContainer.innerHTML = "";
+        for (let i = 0; i < maxPredictions; i++) {
+          labelContainer.appendChild(document.createElement("div"));
+        }
+      } catch (err) {
+        showError(err.name + ": " + err.message);
+      }
+    }
+
+    async function loop() {
+      webcam.update();
+      await predict();
+      window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+      const prediction = await model.predict(webcam.canvas);
+      let detected = false;
+
+      for (let i = 0; i < maxPredictions; i++) {
+        const className = prediction[i].className;
+        const probability = prediction[i].probability;
+
+        labelContainer.childNodes[i].innerHTML = 
+          `${className}: ${(probability * 100).toFixed(0)}%`;
+
+        if (className === TARGET_CLASS && probability >= THRESHOLD) {
+          detected = true;
+        }
+      }
+
+      const alertMsg = document.getElementById("alert-msg");
+      if (detected) {
+        playAlertSound();
+        alertMsg.style.display = "block";
+      } else {
+        alertMsg.style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>
